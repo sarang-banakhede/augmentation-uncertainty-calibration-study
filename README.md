@@ -1,4 +1,4 @@
-# Effect of Data Augmentation Strategies on Uncertainty Quantification and Model Calibration in Skin Lesion Segmentation
+# Effect of Data Augmentation Strategies on Uncertainty Quantification and Model Calibration
 
 > Does the way you train a model change how honest it is about what it doesn't know?  
 > This project says — yes, quite a lot.
