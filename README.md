@@ -29,15 +29,13 @@ Five augmentation strategies are trained under an identical U-Net, identical hyp
 | **Mixing** | MixUp + CutMix (50/50 per batch). Creates ambiguous, interpolated training signal. |
 | **Occlusion** | GridDropout + CoarseDropout. Forces the model to reason from partial information. |
 
-**Training.** ISIC-2016 Skin Lesion Challenge dataset (900 train / 379 test dermoscopic images). One U-Net trained per strategy: Adam (lr = 1e-4), cosine-annealing schedule, batch size 32, 50 epochs, binary cross-entropy loss, Spatial Dropout2D (p = 0.3) embedded in every conv block.
-
-**Domain-shift evaluation.** The same five trained models are re-evaluated, unmodified, on **PH2**: 200 dermoscopic images from a different acquisition source, never seen during training. This checks whether any reliability advantage from a given augmentation strategy is a property of the training distribution or something that actually transfers.
-
-**Uncertainty quantification.** Monte Carlo Dropout, T = 20 stochastic forward passes per image at inference, aggregated into a predictive mean (final segmentation) and predictive variance (epistemic uncertainty), plus predictive entropy of the aggregated decision.
-
-**Calibration.** Expected Calibration Error (ECE, 10 bins) and Brier Score, measuring whether stated confidence actually matches observed accuracy.
-
-**Error correlation.** Spearman correlation between per-image uncertainty (variance and entropy) and segmentation error (1 − Dice), to test whether the uncertainty signal is actually informative or just noise.
+| Component | Details |
+|---|---|
+| **Training** | ISIC-2016 Skin Lesion Challenge dataset. 900 train / 379 test dermoscopic images. One U-Net per strategy. Adam optimizer (lr = 1e-4), cosine-annealing schedule, batch size 32, 50 epochs, binary cross-entropy loss. Spatial Dropout2D (p = 0.3) embedded in every conv block. |
+| **Domain-shift evaluation** | The same five trained models are re-evaluated, unmodified, on PH2. 200 dermoscopic images from a different acquisition source, never seen during training. Tests whether a strategy's reliability advantage comes from the training distribution or actually transfers. |
+| **Uncertainty quantification** | Monte Carlo Dropout. T = 20 stochastic forward passes per image at inference. Aggregated into a predictive mean (final segmentation), predictive variance (epistemic uncertainty), and predictive entropy of the aggregated decision. |
+| **Calibration** | Expected Calibration Error (ECE, 10 bins) and Brier Score. Measures whether stated confidence actually matches observed accuracy. |
+| **Error correlation** | Spearman correlation between per-image uncertainty (variance and entropy) and segmentation error (1 − Dice). Tests whether the uncertainty signal is actually informative or just noise. |
 
 Statistical testing, effect sizes, reliability diagrams, and the full result set live in the accompanying manuscript and are intentionally not included in this repository. What follows documents the pipeline itself: what it does, how it's configured, and exactly what goes in and comes out.
 
