@@ -1,131 +1,216 @@
-# Effect of Data Augmentation Strategies on Uncertainty Quantification and Model Calibration
+# When Can We Trust Medical Image Segmentation? Augmentation, Uncertainty & Calibration
 
-> Does the way you train a model change how honest it is about what it doesn't know?  
-> This project says — yes, quite a lot.
+**Does the augmentation strategy you pick during training change how honest your model's confidence is — even when it doesn't change its accuracy?**
 
-Most augmentation research stops at Dice scores. We go further: we ask whether the *choice of augmentation strategy* affects how well-calibrated a model's confidence is, and whether its uncertainty actually means something — i.e., does high uncertainty correlate with high error?
+> Status: manuscript under review, not yet published.
 
-We evaluate five augmentation strategies on a U-Net with MC-Dropout, testing not just segmentation performance but calibration quality and out-of-distribution reliability on an unseen dataset (PH2).
+---
 
-The short answer: **better Dice does not mean better calibration**. Mixing augmentation achieves the 2nd-best Dice but the worst ECE. Occlusion achieves the best calibration *and* is the only strategy to improve DSC under domain shift.
+## The Problem
+
+Data augmentation is applied to almost every medical image segmentation model, almost reflexively, to fight overfitting. Its effect on accuracy has been studied extensively. Its effect on **reliability** — whether the model's confidence can actually be trusted — has not.
+
+A segmentation model can hit a strong Dice score and still be dangerously overconfident exactly where it fails. That gap between "accurate on average" and "trustworthy at the individual prediction level" is invisible to overlap metrics alone, and augmentation — which reshapes the entire training distribution — is a natural place to look for it. Yet standard practice treats augmentation as background noise rather than a variable that itself deserves scrutiny.
+
+This project asks the question directly:
+
+> **Holding the architecture, optimizer, and training protocol fixed, and varying only the augmentation strategy — how does each strategy reshape a model's uncertainty and calibration, and does that reshaping survive a shift to an unseen dataset?**
+
+---
+
+## Approach
+
+Five augmentation strategies are trained under an identical U-Net, identical hyperparameters, and identical training budget, so that any difference observed can be attributed to the augmentation itself and nothing else.
+
+| Strategy | What it does |
+|---|---|
+| **Baseline** | No augmentation. Resize + normalize only. |
+| **Geometric** | Horizontal/vertical flips, ±30° rotation, elastic deformation. Preserves intensity, changes shape. |
+| **Intensity** | Brightness–contrast jitter, Gaussian noise, gamma correction. Preserves shape, changes appearance. |
+| **Mixing** | MixUp + CutMix (50/50 per batch). Creates ambiguous, interpolated training signal. |
+| **Occlusion** | GridDropout + CoarseDropout. Forces the model to reason from partial information. |
+
+**Training** — ISIC-2016 Skin Lesion Challenge dataset (900 train / 379 test dermoscopic images). One U-Net trained per strategy: Adam (lr = 1e-4), cosine-annealing schedule, batch size 32, 50 epochs, binary cross-entropy loss, Spatial Dropout2D (p = 0.3) embedded in every conv block.
+
+**Domain-shift evaluation** — the same five trained models are re-evaluated, unmodified, on **PH2**: 200 dermoscopic images from a different acquisition source, never seen during training. This checks whether any reliability advantage from a given augmentation strategy is a property of the training distribution or something that actually transfers.
+
+**Uncertainty quantification** — Monte Carlo Dropout, T = 20 stochastic forward passes per image at inference, aggregated into a predictive mean (final segmentation) and predictive variance (epistemic uncertainty), plus predictive entropy of the aggregated decision.
+
+**Calibration** — Expected Calibration Error (ECE, 10 bins) and Brier Score, measuring whether stated confidence actually matches observed accuracy.
+
+**Error correlation** — Spearman correlation between per-image uncertainty (variance and entropy) and segmentation error (1 − Dice), to test whether the uncertainty signal is actually informative or just noise.
+
+Statistical testing, effect sizes, reliability diagrams, and the full result set live in the accompanying manuscript and are intentionally not included in this repository. What follows documents the pipeline itself: what it does, how it's configured, and exactly what goes in and comes out.
 
 ---
 
 ## Datasets
 
-**ISIC-2016** — Primary training and in-distribution test set. Dermoscopic skin lesion images with binary segmentation masks.
-
-**PH2** — Out-of-distribution evaluation only. Never seen during training. Acquired under a different dermoscopy protocol, making it a natural domain shift testbed.
+| Key | Role | Dataset | Size |
+|---|---|---|---|
+| ISIC-2016 | Training + in-distribution test | ISIC 2016 Skin Lesion Challenge | 900 train / 379 test |
+| PH2 | Out-of-distribution evaluation only | PH2 Dataset | 200 images |
 
 ---
 
-## Project Structure
+## Repository Structure
 
 ```
 .
 ├── src/
-│   ├── config.py          # hyperparameters and dataset paths
-│   ├── model.py           # U-Net with embedded MC-Dropout
-│   ├── datasets.py        # ISIC-2016 and PH2 dataset classes
-│   ├── augmentations.py   # five augmentation strategies
-│   ├── metrics.py         # Dice, ECE, Brier, HD95, entropy
-│   └── engine.py          # train loop, eval loop, MC-Dropout inference
+│   ├── config.py           # hyperparameters, paths, strategy registry
+│   ├── model.py             # U-Net with embedded MC-Dropout
+│   ├── datasets.py          # ISIC-2016 and PH2 dataset classes
+│   ├── augmentations.py     # five augmentation strategies + MixUp/CutMix
+│   ├── metrics.py           # Dice, IoU, HD95, ECE, Brier, entropy
+│   └── engine.py             # train loop, eval loop, MC-Dropout inference
 │
-├── train.py               # train all five strategies on ISIC-2016
-├── evaluate.py            # OOD evaluation on PH2
-├── visualize.py           # uncertainty map visualization
+├── train.py                  # train all five strategies on ISIC-2016
+├── evaluate.py                # OOD evaluation on PH2
+├── visualize.py               # MC-Dropout uncertainty maps for a single image
 │
-├── results/               # auto-generated after training
+├── results/                   # auto-generated after training
 │   └── {strategy}/
 │       ├── best_weights.pth
+│       ├── last_weights.pth
 │       ├── training_history.csv
 │       ├── isic_inference.csv
 │       └── ph2_inference.csv
 │
-├── figures/               # plots go here
+├── visualizations/             # auto-generated by visualize.py
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## The Five Strategies
-
-| Strategy | What it does |
-|---|---|
-| Baseline | No augmentation. Resize + normalize only. |
-| Geometric | Flips, rotation (±30°), elastic deformation. Preserves intensity, changes shape. |
-| Intensity | Brightness, contrast, Gaussian noise, gamma. Preserves shape, changes appearance. |
-| Mixing | MixUp + CutMix (50/50 per batch). Creates ambiguous, interpolated training signal. |
-| Occlusion | GridDropout + CoarseDropout. Forces the model to reason from partial information. |
-
-All strategies use the same U-Net backbone, same hyperparameters, same number of MC-Dropout forward passes (T=20).
-
----
-
-## What We Measure
-
-**Segmentation** — Dice (DSC), IoU, Hausdorff Distance (HD95)
-
-**Calibration** — Expected Calibration Error (ECE), Brier Score. These measure whether the model's confidence matches its actual accuracy.
-
-**Uncertainty quality** — predictive variance (σ²) and predictive entropy (H) from MC-Dropout, evaluated via Spearman correlation with per-image error (1 − DSC). A high correlation means uncertainty actually flags bad predictions.
-
-**OOD generalization** — all of the above repeated on PH2, which was never seen during training.
-
----
-
 ## Setup
 
 ```bash
-git clone https://github.com/your-username/uq-augmentation.git
-cd uq-augmentation
+git clone https://github.com/sarang-banakhede/augmentation-uncertainty-calibration-study.git
+cd augmentation-uncertainty-calibration-study
 pip install -r requirements.txt
 ```
 
-Download the datasets and place them as follows:
+### Dataset layout
 
 ```
 data/
 ├── ISIC2016/
 │   ├── train/
-│   │   ├── images/   # .png files
-│   │   └── masks/    # .png files
+│   │   ├── images/   # .png
+│   │   └── masks/    # .png
 │   └── test/
 │       ├── images/
 │       └── masks/
 └── PH2Dataset/
-    ├── image/        # .bmp files
-    └── label/        # .bmp files named {id}_lesion.bmp
+    ├── image/         # .bmp
+    └── label/         # .bmp, named {id}_lesion.bmp
 ```
 
-- **ISIC-2016** 
-- **PH2** 
-
-Update the paths in `src/config.py` if you place the data elsewhere.
+**Rules**
+- ISIC-2016: every image needs a mask with the same filename stem. Masks are binarized at threshold 127.
+- PH2: image `IMD002.bmp` pairs with label `IMD002_lesion.bmp`.
+- Update paths in `src/config.py` if your data lives elsewhere.
 
 ---
 
-## Quickstart
+## Configuration
+
+`src/config.py` is the single source of truth for paths, hyperparameters, and the strategy registry:
+
+```python
+IMAGE_SIZE  = 256
+BATCH_SIZE  = 32
+NUM_EPOCHS  = 50
+LR          = 1e-4
+MC_PASSES   = 20      # Monte Carlo Dropout forward passes at inference
+ECE_BINS    = 10
+DROPOUT_P   = 0.3
+SEED        = 42
+
+STRATEGIES = ["baseline", "geometric", "intensity", "mixing", "occlusion"]
+```
+
+All scripts also accept command-line overrides — run any script with `--help` for the full list.
+
+---
+
+## Usage
+
+### 1. Train all five strategies on ISIC-2016
 
 ```bash
-# 1. Train all five strategies on ISIC-2016 (saves to results/)
 python train.py
-
-# 2. Evaluate trained models on PH2 (out-of-distribution)
-python evaluate.py
-
-# 3. Visualize MC-Dropout uncertainty maps for a single image
-python visualize.py --image /path/to/image.png
+python train.py --data_root /path/to/ISIC2016 --results_root /path/to/results
+python train.py --strategies baseline occlusion --epochs 30
 ```
 
-Each script accepts `--help` for available arguments.
+Saves `best_weights.pth` (highest validation Dice), `last_weights.pth`, `training_history.csv`, and runs MC-Dropout inference on the ISIC-2016 test set (`isic_inference.csv`) — all per strategy under `results/{strategy}/`.
+
+### 2. Evaluate on PH2 (out-of-distribution)
+
+```bash
+python evaluate.py
+python evaluate.py --weights_root /path/to/results --ph2_img /path/img --ph2_lbl /path/lbl
+```
+
+Loads each strategy's `best_weights.pth`, runs the identical MC-Dropout protocol on PH2, and saves `ph2_inference.csv` per strategy. Skips any strategy whose weights aren't found yet.
+
+### 3. Visualize uncertainty for a single image, across all strategies
+
+```bash
+python visualize.py --image /path/to/image.png
+python visualize.py --image /path/to/image.png --weights_root results/ --save_dir visualizations/
+```
+
+Produces, per strategy: mean prediction map, predictive variance map, and their combination — plus three summary figures comparing all five strategies side by side (`combined_all_strategies.png`, `variance_comparison.png`, `mean_prediction_comparison.png`).
 
 ---
 
-## Paper
+## Output
 
-For complete methodology, experiments, and results, refer to the manuscript:
+### `training_history.csv` — one row per epoch
 
-> **Effect of Data Augmentation Strategies on Uncertainty Quantification and Model Calibration in Skin Lesion Segmentation**  
-> [Under review]
+| Column | Description |
+|---|---|
+| `epoch` | Epoch number |
+| `train_loss` / `test_loss` | BCE loss |
+| `train_dice` / `test_dice` | Dice coefficient |
+| `train_precision` / `test_precision` | Precision |
+| `train_recall` / `test_recall` | Recall |
+| `train_f1` / `test_f1` | F1 score |
+| `train_accuracy` / `test_accuracy` | Pixel accuracy |
+
+### `isic_inference.csv` / `ph2_inference.csv` — one row per test image
+
+| Column | Description |
+|---|---|
+| `image` | Filename stem |
+| `dice`, `iou`, `precision`, `recall`, `accuracy` | Segmentation metrics on the MC-Dropout mean prediction |
+| `hd95` | 95th-percentile Hausdorff Distance |
+| `avg_uncertainty` | Mean predictive variance (σ²) across the image |
+| `pred_entropy` | Predictive entropy of the mean prediction |
+| `ece` | Expected Calibration Error — model-level, repeated on every row for convenience |
+| `brier_score` | Brier Score — model-level, repeated on every row |
+
+### `visualizations/` — per single image, per strategy
+
+| File | Contents |
+|---|---|
+| `{strategy}_mc_uncertainty.png` | Input, mean prediction, predictive variance side by side |
+| `{strategy}_mean.npy` / `{strategy}_variance.npy` | Raw arrays behind the figure |
+| `combined_all_strategies.png` | All five strategies stacked for direct comparison |
+| `variance_comparison.png` | Variance maps only, shared color scale |
+| `mean_prediction_comparison.png` | Mean predictions only, with foreground-percentage annotation |
+
+---
+
+## Notes
+
+- This repository documents the **pipeline**, not the findings — statistical testing, effect sizes, and discussion live in the manuscript, which is currently under review and not included here.
+- All five strategies use the identical U-Net backbone and training budget; the augmentation strategy is the only variable that changes between runs.
+
+## Citation
+
+A citation entry will be added once the manuscript is accepted.
