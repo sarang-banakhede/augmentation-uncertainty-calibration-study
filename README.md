@@ -1,5 +1,5 @@
-# Accurate but Overconfident: The Hidden Cost of Augmentation Choices
-### Same Accuracy, Different Trust: How Augmentation Silently Rewires Model Confidence
+# Effect of Data Augmentation on Uncertainty and Calibration in Medical Image Segmentation
+### When Can We Trust Medical Image Segmentation? The Impact of Data Augmentation on Uncertainty and Calibration
 
 > Status: manuscript under review, not yet published.
 
